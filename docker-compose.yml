@@ -627,7 +627,7 @@ services:
       - SPAN_STORAGE_TYPE=opensearch
       - ES_TAGS_AS_FIELDS_ALL=true
       - ES_USERNAME=admin
-      - ES_PASSWORD=admin
+      - ES_PASSWORD=myStrongPassword123!
       - ES_TLS_SKIP_HOST_VERIFY=true
     logging: *logging
     depends_on:
@@ -732,6 +732,7 @@ services:
       - cluster.initial_cluster_manager_nodes=opensearch
       - bootstrap.memory_lock=true
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=myStrongPassword123!"
     ulimits:
       memlock:
         soft: -1
