@@ -627,7 +627,7 @@ services:
       - SPAN_STORAGE_TYPE=opensearch
       - ES_TAGS_AS_FIELDS_ALL=true
       - ES_USERNAME=admin
-      - ES_PASSWORD=myStrongPassword123!
+      - ES_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD}
       - ES_TLS_SKIP_HOST_VERIFY=true
     logging: *logging
     depends_on:
@@ -723,7 +723,7 @@ services:
 
   # OpenSearch store - engine
   opensearch:
-    image: opensearchstaging/opensearch:${OPENSEARCH_VERSION}
+    image: opensearchproject/opensearch:${OPENSEARCH_VERSION}
     container_name: opensearch
     environment:
       - cluster.name=opensearch-cluster
