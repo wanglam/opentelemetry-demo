@@ -666,7 +666,7 @@ services:
       - SPAN_STORAGE_TYPE=opensearch
       - ES_TAGS_AS_FIELDS_ALL=true
       - ES_USERNAME=admin
-      - ES_PASSWORD=admin
+      - ES_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD}
       - ES_TLS_SKIP_HOST_VERIFY=true
     logging: *logging
     depends_on:
@@ -770,6 +770,7 @@ services:
     networks:
       - opensearch-otel-demo
 
+
   opensearch-node1:
     image: opensearchproject/opensearch:latest
     container_name: opensearch-node1
@@ -780,6 +781,7 @@ services:
       - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2
       - bootstrap.memory_lock=true # along with the memlock settings below, disables swapping
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m" # minimum and maximum Java heap size, recommend setting both to 50% of system RAM
+      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD}"
     ulimits:
       memlock:
         soft: -1
@@ -805,6 +807,7 @@ services:
       - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2
       - bootstrap.memory_lock=true
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD}"
     ulimits:
       memlock:
         soft: -1
