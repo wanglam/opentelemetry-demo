@@ -44,6 +44,9 @@
         }
       ],
       "properties": {
+        "serviceName": {
+          "type": "keyword"
+        },
         "name": {
           "type": "keyword",
           "ignore_above": 256
@@ -211,6 +214,10 @@
               "ignore_above": 256,
               "type": "keyword"
             },
+            "serviceName": {
+              "ignore_above": 256,
+              "type": "keyword"
+            },
             "spanId": {
               "ignore_above": 256,
               "type": "keyword"
@@ -286,4 +293,3 @@
     ]
   }
 }
-
