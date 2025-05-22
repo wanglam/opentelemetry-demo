@@ -50,8 +50,29 @@ var (
 	initResourcesOnce sync.Once
 )
 
+func WithTraceFields(ctx context.Context) logrus.Fields {
+    span := trace.SpanFromContext(ctx)
+    sc := span.SpanContext()
+    if !sc.IsValid() {
+        return logrus.Fields{}
+    }
+    return logrus.Fields{
+        "trace_id": sc.TraceID().String(),
+        "span_id":  sc.SpanID().String(),
+    }
+}
+
 func init() {
 	log = logrus.New()
+	log.Level = logrus.DebugLevel
+	log.Formatter = &logrus.JSONFormatter{
+		FieldMap: logrus.FieldMap{
+			logrus.FieldKeyTime:  "time",
+			logrus.FieldKeyLevel: "level",
+			logrus.FieldKeyMsg:   "message",
+		},
+		TimestampFormat: time.RFC3339Nano,
+	}
 	catalog = readCatalogFile()
 }
 
@@ -222,6 +243,7 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		msg := fmt.Sprintf("Product Not Found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
+		log.WithFields(WithTraceFields(ctx)).Errorf(msg);
 		return nil, status.Errorf(codes.NotFound, msg)
 	}
 
@@ -230,6 +252,7 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 	span.SetAttributes(
 		attribute.String("app.product.name", found.Name),
 	)
+	log.WithFields(WithTraceFields(ctx)).Infof(msg);
 	return found, nil
 }
 
@@ -246,6 +269,7 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 	span.SetAttributes(
 		attribute.Int("app.products_search.count", len(result)),
 	)
+	log.WithFields(WithTraceFields(ctx)).Infof("search products, count:%d", len(result));
 	return &pb.SearchProductsResponse{Results: result}, nil
 }
 
@@ -269,6 +293,7 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
 		span.AddEvent("error", trace.WithAttributes(attribute.String("message", fmt.Sprintf("GetFlag Failed: %s", flagName))))
+		log.WithFields(WithTraceFields(ctx)).Errorf(fmt.Sprintf("GetFlag Failed: %s", flagName));
 		return false
 	}
 

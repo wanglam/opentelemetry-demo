@@ -45,7 +45,15 @@ services:
         condition: service_started
       kafka:
         condition: service_healthy
-    logging: *logging
+      fluentbit:
+        condition: service_started
+    links:
+      - fluentbit
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: accounting
     networks:
       - opensearch-otel-demo
 
@@ -158,7 +166,15 @@ services:
         condition: service_started
       kafka:
         condition: service_healthy
-    logging: *logging
+      fluentbit:
+        condition: service_started
+    links:
+      - fluentbit
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: checkout
     networks:
       - opensearch-otel-demo
 
@@ -187,7 +203,15 @@ services:
     depends_on:
       otelcol:
         condition: service_started
-    logging: *logging
+      fluentbit:
+        condition: service_started
+    links:
+      - fluentbit
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: currency
     networks:
       - opensearch-otel-demo
 
@@ -215,7 +239,15 @@ services:
     depends_on:
       otelcol:
         condition: service_started
-    logging: *logging
+      fluentbit:
+        condition: service_started
+    links:
+      - fluentbit
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: email
     networks:
       - opensearch-otel-demo
 
@@ -277,7 +309,15 @@ services:
         condition: service_started
       kafka:
         condition: service_healthy
-    logging: *logging
+      fluentbit:
+        condition: service_started
+    links:
+      - fluentbit
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: frauddetection
     networks:
       - opensearch-otel-demo
 
@@ -378,8 +418,8 @@ services:
     build:
       context: ./
       dockerfile: ./src/paymentservice/Dockerfile
-      cache_from:
-        - ${IMAGE_NAME}:${IMAGE_VERSION}-paymentservice
+      # cache_from:
+      #   - ${IMAGE_NAME}:${IMAGE_VERSION}-paymentservice
     deploy:
       resources:
         limits:
@@ -393,10 +433,16 @@ services:
       - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
       - OTEL_RESOURCE_ATTRIBUTES
       - OTEL_SERVICE_NAME=paymentservice
+    links:
+      - fluentbit
     depends_on:
-      otelcol:
-        condition: service_started
-    logging: *logging
+      - otelcol
+      - fluentbit
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: payment
     networks:
       - opensearch-otel-demo
 
@@ -426,7 +472,15 @@ services:
     depends_on:
       otelcol:
         condition: service_started
-    logging: *logging
+      fluentbit:
+        condition: service_started
+    links:
+      - fluentbit
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: productcatalog
     networks:
       - opensearch-otel-demo
 
@@ -530,6 +584,8 @@ services:
     ports:
       - "24224:24224"
       - "24224:24224/udp"
+    environment:
+      - OTEL_COLLECTOR_HOST
     depends_on:
       - opensearch-dashboards
     networks:
@@ -560,7 +616,15 @@ services:
     depends_on:
       otelcol:
         condition: service_started
-    logging: *logging
+      fluentbit:
+        condition: service_started
+    links:
+      - fluentbit
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: 127.0.0.1:24224
+        tag: shipping
     networks:
       - opensearch-otel-demo
 

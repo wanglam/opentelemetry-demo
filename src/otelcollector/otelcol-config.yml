@@ -4,7 +4,7 @@ extensions:
   basicauth/client:
     client_auth:
       username: admin
-      password: admin
+      password: my_%New%_passW0rd!@#
 
 receivers:
   otlp:
@@ -104,7 +104,7 @@ service:
     metrics:
       receivers: [otlp, spanmetrics]
       processors: [filter/ottl, transform, batch]
-      exporters: [otlphttp/prometheus, otlp/metrics, debug]
+      exporters: [otlp/metrics, debug]
     logs:
       receivers: [otlp]
       processors: [batch]

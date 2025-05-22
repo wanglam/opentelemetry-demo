@@ -7,7 +7,8 @@ use opentelemetry_semantic_conventions as semcov;
 use shop::shipping_service_server::ShippingService;
 use shop::{GetQuoteRequest, GetQuoteResponse, Money, ShipOrderRequest, ShipOrderResponse};
 use tonic::{Request, Response, Status};
-
+use serde_json::json;
+use chrono::Utc;
 use log::*;
 
 mod quote;
@@ -55,7 +56,6 @@ impl ShippingService for ShippingServer {
         &self,
         request: Request<GetQuoteRequest>,
     ) -> Result<Response<GetQuoteResponse>, Status> {
-        info!("GetQuoteRequest: {:?}", request);
         let parent_cx =
             global::get_text_map_propagator(|prop| prop.extract(&MetadataMap(request.metadata())));
 
@@ -63,6 +63,7 @@ impl ShippingService for ShippingServer {
 
         let itemct: u32 = request_message
             .items
+            .clone()
             .into_iter()
             .fold(0, |accum, cart_item| accum + (cart_item.quantity as u32));
 
@@ -72,6 +73,23 @@ impl ShippingService for ShippingServer {
         let tracer = global::tracer("shippingservice");
         let mut span = tracer.span_builder("oteldemo.ShippingService/GetQuote").with_kind(SpanKind::Server).start_with_context(&tracer, &parent_cx);
         span.set_attribute(semcov::trace::RPC_SYSTEM.string(RPC_SYSTEM_GRPC));
+
+        // Get trace_id and span_id as hex strings
+        let span_context = span.span_context();
+        let trace_id = span_context.trace_id().to_string();
+        let span_id = span_context.span_id().to_string();
+
+        let timestamp = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        // Prepare JSON log entry
+        let log_entry = json!({
+            "time": timestamp,
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "message": format!("GetQuoteRequest: {:?}", request_message),
+        });
+
+        // Log JSON string
+        info!("{}", log_entry.to_string());
 
         span.add_event("Processing get quote request".to_string(), vec![]);
         span.set_attribute(KeyValue::new("app.shipping.zip_code", request_message.address.unwrap().zip_code));
@@ -92,7 +110,15 @@ impl ShippingService for ShippingServer {
                 nanos: q.cents * NANOS_MULTIPLE,
             }),
         };
-        info!("Sending Quote: {}", q);
+
+        let timestamp2 = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let log_entry2 = json!({
+            "time": timestamp2,
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "message": format!("Sending Quote::{}", q),
+        });
+        info!("{}", log_entry2.to_string());
 
         cx.span().set_attribute(semcov::trace::RPC_GRPC_STATUS_CODE.i64(RPC_GRPC_STATUS_CODE_OK));
         Ok(Response::new(reply))
@@ -101,7 +127,8 @@ impl ShippingService for ShippingServer {
         &self,
         request: Request<ShipOrderRequest>,
     ) -> Result<Response<ShipOrderResponse>, Status> {
-        info!("ShipOrderRequest: {:?}", request);
+        // Get current timestamp with milliseconds
+        let timestamp = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
         let parent_cx =
             global::get_text_map_propagator(|prop| prop.extract(&MetadataMap(request.metadata())));
@@ -112,11 +139,35 @@ impl ShippingService for ShippingServer {
             .span_builder("oteldemo.ShippingService/ShipOrder").with_kind(SpanKind::Server).start_with_context(&tracer, &parent_cx);
         span.set_attribute(semcov::trace::RPC_SYSTEM.string(RPC_SYSTEM_GRPC));
 
+        // Get trace_id and span_id as hex strings
+        let span_context = span.span_context();
+        let trace_id = span_context.trace_id().to_string();
+        let span_id = span_context.span_id().to_string();
+
+        // Prepare JSON log entry
+        let log_entry = json!({
+            "time": timestamp,
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "message": format!("ShipOrderRequest: {:?}", request),
+        });
+
+        // Log JSON string
+        info!("{}", log_entry.to_string());
+
         span.add_event("Processing shipping order request".to_string(), vec![]);
 
         let tid = create_tracking_id();
         span.set_attribute(KeyValue::new("app.shipping.tracking.id", tid.clone()));
-        info!("Tracking ID Created: {}", tid);
+
+        let timestamp2 = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let log_entry2 = json!({
+            "time": timestamp2,
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "message": format!("Tracking ID Created: {}", tid),
+        });
+        info!("{}", log_entry2.to_string());
 
         span.add_event(
             "Shipping tracking id created, response sent back".to_string(),

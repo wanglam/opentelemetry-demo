@@ -8,8 +8,10 @@ WORKDIR /usr/src/app/
 
 RUN apk add build-base protobuf-dev protoc
 
+RUN apk add --no-cache git
+
 COPY ./src/productcatalogservice/ ./
-RUN go build -o /go/bin/productcatalogservice/
+RUN GOPROXY=direct go build -o /go/bin/productcatalogservice/
 
 # -----------------------------------------------------------------------------
 

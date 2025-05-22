@@ -5,8 +5,11 @@
 FROM golang:1.21.3-alpine AS builder
 WORKDIR /usr/src/app/
 
+# Install git (and any other needed tools)
+RUN apk add --no-cache git
+
 COPY ./src/checkoutservice/ ./
-RUN go build -o /go/bin/checkoutservice/
+RUN GOPROXY=direct go build -o /go/bin/checkoutservice/
 
 # -----------------------------------------------------------------------------
 

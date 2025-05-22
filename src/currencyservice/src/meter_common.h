@@ -26,7 +26,8 @@ namespace
     otlp_exporter::OtlpGrpcMetricExporterOptions otlpOptions;
 
     // Configuration via environment variable not supported yet
-    otlpOptions.aggregation_temporality = metric_sdk::AggregationTemporality::kDelta;
+    otlpOptions.aggregation_temporality = opentelemetry::v1::exporter::otlp::PreferredAggregationTemporality::kDelta;
+
     auto exporter = otlp_exporter::OtlpGrpcMetricExporterFactory::Create(otlpOptions);
 
     // Build MeterProvider and Reader

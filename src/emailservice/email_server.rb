@@ -4,6 +4,8 @@
 require "ostruct"
 require "pony"
 require "sinatra"
+require 'json'
+require 'time'  # for ISO 8601 formatting
 
 require "opentelemetry/sdk"
 require "opentelemetry/exporter/otlp"
@@ -44,7 +46,19 @@ def send_email(data)
       via:      :test
     )
     span.set_attribute("app.email.recipient", data.email)
-    puts "Order confirmation email sent to: #{data.email}"
+    # Get current span context
+    span_context = span.context
+
+    # Prepare log data
+    log_entry = {
+      time: Time.now.utc.iso8601(3),  # ISO 8601 with milliseconds
+      message: "Order confirmation email sent to: #{data.email}",
+      trace_id: span_context.trace_id.unpack1('H*'),  # hex string
+      span_id: span_context.span_id.unpack1('H*')     # hex string
+    }
+
+    # Print JSON log
+    puts log_entry.to_json
   end
   # manually created spans need to be ended
   # in Ruby, the method `in_span` ends it automatically

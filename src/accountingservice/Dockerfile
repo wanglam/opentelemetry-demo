@@ -5,8 +5,10 @@
 FROM golang:1.21.3-alpine AS builder
 WORKDIR /usr/src/app/
 
+RUN apk add --no-cache git
+
 COPY ./src/accountingservice/ ./
-RUN go build -o /go/bin/accountingservice/
+RUN GOPROXY=direct go build -o /go/bin/accountingservice/
 
 # -----------------------------------------------------------------------------
 
