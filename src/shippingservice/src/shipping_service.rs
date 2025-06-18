@@ -85,7 +85,7 @@ impl ShippingService for ShippingServer {
             "time": timestamp,
             "trace_id": trace_id,
             "span_id": span_id,
-            "message": format!("GetQuoteRequest: {:?}", request_message),
+            "message": format!("{:?}", request_message),
         });
 
         // Log JSON string
@@ -100,8 +100,28 @@ impl ShippingService for ShippingServer {
             .await
         {
             Ok(quote) => quote,
-            Err(status) => {cx.span().set_attribute(semcov::trace::RPC_GRPC_STATUS_CODE.i64(RPC_GRPC_STATUS_CODE_UNKNOWN)); return Err(status)},
+            Err(status) => {
+                let log_entry_failed = json!({
+                    "time": timestamp,
+                    "trace_id": trace_id,
+                    "span_id": span_id,
+                    "message": format!("GetQuoteRequest failed, status: {:?}", status),
+                });
+
+                error!("{}", log_entry_failed.to_string());
+                cx.span().set_attribute(semcov::trace::RPC_GRPC_STATUS_CODE.i64(RPC_GRPC_STATUS_CODE_UNKNOWN)); 
+                return Err(status)
+            },
         };
+
+        let log_entry_success = json!({
+            "time": timestamp,
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "message": "GetQuoteRequest successfully",
+        });
+
+        info!("{}", log_entry_success.to_string());
 
         let reply = GetQuoteResponse {
             cost_usd: Some(Money {
