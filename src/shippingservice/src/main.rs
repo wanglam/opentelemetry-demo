@@ -12,6 +12,7 @@ use opentelemetry::{
             SdkProvidedResourceDetector,
         },
         trace as sdktrace,
+        metrics as sdkmetrics,
     },
 };
 use opentelemetry_otlp::{self, WithExportConfig};
@@ -40,6 +41,34 @@ fn init_logger() -> Result<(), log::SetLoggerError> {
         SimpleLogger::new(LevelFilter::Error, Config::default()),
     ])
     // debug is used on lower level apis and not used here.
+}
+
+fn init_meter_provider() -> Result<sdkmetrics::MeterProvider, opentelemetry::metrics::MetricsError> {
+    let os_resource = OsResourceDetector.detect(Duration::from_secs(0));
+    let process_resource = ProcessResourceDetector.detect(Duration::from_secs(0));
+    let sdk_resource = SdkProvidedResourceDetector.detect(Duration::from_secs(0));
+    let env_resource = EnvResourceDetector::new().detect(Duration::from_secs(0));
+    let telemetry_resource = TelemetryResourceDetector.detect(Duration::from_secs(0));
+    
+    let merged_resource = os_resource
+        .merge(&process_resource)
+        .merge(&sdk_resource)
+        .merge(&env_resource)
+        .merge(&telemetry_resource);
+
+    opentelemetry_otlp::new_pipeline()
+        .metrics(opentelemetry::runtime::Tokio)
+        .with_exporter(
+            opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_endpoint(
+                    env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+                        .unwrap_or_else(|_| "http://otelcol:4317".to_string())
+                )
+        )
+        .with_resource(merged_resource)
+        .with_period(Duration::from_secs(5))
+        .build()
 }
 
 fn init_tracer() -> Result<sdktrace::Tracer, TraceError> {
@@ -83,11 +112,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
 
     init_logger()?;
+    
+    // Initialize metrics provider
+    let meter_provider = init_meter_provider()?;
+    global::set_meter_provider(meter_provider);
+    info!("Metrics provider initialized");
+    
     init_reqwest_tracing(init_tracer()?)?;
     info!("OTel pipeline created");
     
     // Start CPU metrics collection in background
-    tokio::spawn(cpu_metrics::start_cpu_metrics_collection());
+    tokio::spawn(async {
+        if let Err(e) = cpu_metrics::start_cpu_metrics_collection().await {
+            error!("CPU metrics collection failed: {}", e);
+        }
+    });
     info!("CPU metrics collection started");
     
     let port = env::var("SHIPPING_SERVICE_PORT").expect("$SHIPPING_SERVICE_PORT is not set");
