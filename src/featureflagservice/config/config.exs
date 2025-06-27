@@ -16,7 +16,7 @@ config :featureflagservice,
 
 # Configures the endpoint
 config :featureflagservice, FeatureflagserviceWeb.Endpoint,
-  url: [host: "localhost", path: "/feature"],
+  url: [host: "localhost"],
   render_errors: [view: FeatureflagserviceWeb.ErrorView, accepts: ~w(html json), layout: false],
   pubsub_server: Featureflagservice.PubSub,
   live_view: [signing_salt: "T88WPl/Q"]
