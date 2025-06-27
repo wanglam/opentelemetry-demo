@@ -123,9 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Start CPU metrics collection in background
     tokio::spawn(async {
-        if let Err(e) = cpu_metrics::start_cpu_metrics_collection().await {
-            error!("CPU metrics collection failed: {}", e);
-        }
+        cpu_metrics::start_cpu_metrics_collection().await;
     });
     info!("CPU metrics collection started");
     
