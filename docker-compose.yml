@@ -604,6 +604,7 @@ services:
       resources:
         limits:
           memory: 250M
+          cpus: '1.0'  # Limit to 1 CPU core
     restart: unless-stopped
     ports:
       - "${SHIPPING_SERVICE_PORT}"

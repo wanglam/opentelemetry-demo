@@ -1,0 +1,27 @@
+# Alternative Docker Compose configuration with CPU limits for testing
+# Use this to test CPU metrics with restricted resources
+
+version: '3.9'
+
+services:
+  shippingservice:
+    image: ${IMAGE_NAME}:${IMAGE_VERSION}-shippingservice
+    container_name: shipping-service-cpu-limited
+    build:
+      context: ./
+      dockerfile: ./src/shippingservice/Dockerfile
+    # CPU limits using older syntax for better compatibility
+    cpus: 1.0          # Limit to 1 CPU core
+    cpu_count: 1       # Only see 1 CPU core
+    mem_limit: 250M    # Memory limit
+    restart: unless-stopped
+    ports:
+      - "${SHIPPING_SERVICE_PORT:-50051}:50051"
+    environment:
+      - SHIPPING_SERVICE_PORT=50051
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://otelcol:4317/v1/traces
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4317
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=shippingservice,service.version=1.0.0
+      - OTEL_SERVICE_NAME=shippingservice
+    # For testing without dependencies
+    network_mode: bridge

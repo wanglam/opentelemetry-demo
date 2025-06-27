@@ -100,17 +100,24 @@ impl CpuMetricsState {
                     
                     if total_diff > 0 {
                         self.container_cpu_usage = (active_diff as f64 / total_diff as f64) * 100.0;
+                        
+                        // Debug information for troubleshooting
+                        debug!("CPU calculation - Total diff: {}, Active diff: {}, Usage: {:.2}%", 
+                               total_diff, active_diff, self.container_cpu_usage);
                     }
                 } else {
                     // First measurement, can't calculate diff yet
                     self.container_cpu_usage = 0.0;
+                    info!("First CPU measurement taken, next measurement will show usage");
                 }
                 self.last_cpu_stats = Some(current_stats);
             }
             Err(e) => {
                 warn!("Failed to read /proc/stat for accurate CPU usage: {}", e);
                 // Fallback to sysinfo (less accurate in containers)
-                self.container_cpu_usage = self.system.global_cpu_info().cpu_usage() as f64;
+                let fallback_usage = self.system.global_cpu_info().cpu_usage() as f64;
+                self.container_cpu_usage = fallback_usage;
+                debug!("Using fallback CPU calculation: {:.2}%", fallback_usage);
             }
         }
         
