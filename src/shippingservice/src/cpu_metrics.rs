@@ -9,55 +9,106 @@ use tokio::time::interval;
 use log::*;
 use std::fs;
 
-// CPU stats from /proc/stat for more accurate container CPU calculation
+// CPU stats from cgroups (same as docker stats) for accurate container CPU
 #[derive(Debug, Clone)]
-struct CpuStats {
-    user: u64,
-    nice: u64,
-    system: u64,
-    idle: u64,
-    iowait: u64,
-    irq: u64,
-    softirq: u64,
-    steal: u64,
+struct CgroupCpuStats {
+    usage_total: u64,
+    system_usage: u64,
+    online_cpus: u32,
 }
 
-impl CpuStats {
-    fn from_proc_stat() -> Result<Self, Box<dyn std::error::Error>> {
-        let content = fs::read_to_string("/proc/stat")?;
-        let first_line = content.lines().next().ok_or("Empty /proc/stat")?;
+impl CgroupCpuStats {
+    fn from_cgroup() -> Result<Self, Box<dyn std::error::Error>> {
+        // Try cgroups v2 first, then v1
+        let (usage_total, system_usage, online_cpus) = 
+            Self::try_cgroups_v2().or_else(|_| Self::try_cgroups_v1())?;
         
-        if !first_line.starts_with("cpu ") {
-            return Err("Invalid /proc/stat format".into());
-        }
-        
-        let parts: Vec<&str> = first_line.split_whitespace().collect();
-        if parts.len() < 9 {
-            return Err("Insufficient CPU stats in /proc/stat".into());
-        }
-        
-        Ok(CpuStats {
-            user: parts[1].parse()?,
-            nice: parts[2].parse()?,
-            system: parts[3].parse()?,
-            idle: parts[4].parse()?,
-            iowait: parts[5].parse()?,
-            irq: parts[6].parse()?,
-            softirq: parts[7].parse()?,
-            steal: parts[8].parse()?,
+        Ok(CgroupCpuStats {
+            usage_total,
+            system_usage,
+            online_cpus,
         })
     }
     
-    fn total(&self) -> u64 {
-        self.user + self.nice + self.system + self.idle + self.iowait + self.irq + self.softirq + self.steal
+    fn try_cgroups_v2() -> Result<(u64, u64, u32), Box<dyn std::error::Error>> {
+        // cgroups v2 path
+        let usage_str = fs::read_to_string("/sys/fs/cgroup/cpu.stat")?;
+        let mut usage_total = 0u64;
+        
+        for line in usage_str.lines() {
+            if line.starts_with("usage_usec ") {
+                usage_total = line.split_whitespace().nth(1)
+                    .ok_or("Invalid cpu.stat format")?
+                    .parse::<u64>()? * 1000; // Convert microseconds to nanoseconds
+                break;
+            }
+        }
+        
+        if usage_total == 0 {
+            return Err("Could not find usage_usec in cpu.stat".into());
+        }
+        
+        // System CPU usage from /proc/stat
+        let stat_content = fs::read_to_string("/proc/stat")?;
+        let first_line = stat_content.lines().next().ok_or("Empty /proc/stat")?;
+        let parts: Vec<&str> = first_line.split_whitespace().collect();
+        
+        if parts.len() < 8 {
+            return Err("Invalid /proc/stat format".into());
+        }
+        
+        let system_usage: u64 = parts[1..8].iter()
+            .map(|s| s.parse::<u64>().unwrap_or(0))
+            .sum::<u64>() * 10_000_000; // Convert to nanoseconds (assuming 100Hz)
+        
+        let online_cpus = Self::get_online_cpus()?;
+        
+        Ok((usage_total, system_usage, online_cpus))
     }
     
-    fn idle_total(&self) -> u64 {
-        self.idle + self.iowait
+    fn try_cgroups_v1() -> Result<(u64, u64, u32), Box<dyn std::error::Error>> {
+        // cgroups v1 paths
+        let usage_total = fs::read_to_string("/sys/fs/cgroup/cpu,cpuacct/cpuacct.usage")?
+            .trim().parse::<u64>()?;
+        
+        // System CPU usage from /proc/stat  
+        let stat_content = fs::read_to_string("/proc/stat")?;
+        let first_line = stat_content.lines().next().ok_or("Empty /proc/stat")?;
+        let parts: Vec<&str> = first_line.split_whitespace().collect();
+        
+        if parts.len() < 8 {
+            return Err("Invalid /proc/stat format".into());
+        }
+        
+        let system_usage: u64 = parts[1..8].iter()
+            .map(|s| s.parse::<u64>().unwrap_or(0))
+            .sum::<u64>() * 10_000_000; // Convert to nanoseconds
+        
+        let online_cpus = Self::get_online_cpus()?;
+        
+        Ok((usage_total, system_usage, online_cpus))
     }
     
-    fn active_total(&self) -> u64 {
-        self.total() - self.idle_total()
+    fn get_online_cpus() -> Result<u32, Box<dyn std::error::Error>> {
+        // Try to get CPU count from cgroup limits first
+        if let Ok(quota_str) = fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") {
+            if let Ok(period_str) = fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_period_us") {
+                let quota: i64 = quota_str.trim().parse().unwrap_or(-1);
+                let period: u64 = period_str.trim().parse().unwrap_or(100000);
+                
+                if quota > 0 {
+                    return Ok((quota as u64 / period).max(1) as u32);
+                }
+            }
+        }
+        
+        // Fallback to system CPU count
+        let cpuinfo = fs::read_to_string("/proc/cpuinfo")?;
+        let cpu_count = cpuinfo.lines()
+            .filter(|line| line.starts_with("processor"))
+            .count() as u32;
+        
+        Ok(cpu_count.max(1))
     }
 }
 
@@ -68,7 +119,7 @@ struct CpuMetricsState {
     container_cpu_usage: f64,
     process_cpu_usage: f64,
     process_memory_usage: u64,
-    last_cpu_stats: Option<CpuStats>,
+    last_cgroup_stats: Option<CgroupCpuStats>,
     last_measurement_time: Instant,
 }
 
@@ -83,7 +134,7 @@ impl CpuMetricsState {
             container_cpu_usage: 0.0,
             process_cpu_usage: 0.0,
             process_memory_usage: 0,
-            last_cpu_stats: None,
+            last_cgroup_stats: None,
             last_measurement_time: Instant::now(),
         })
     }
@@ -91,33 +142,35 @@ impl CpuMetricsState {
     fn refresh(&mut self) {
         self.system.refresh_all();
         
-        // Calculate accurate container CPU usage using /proc/stat
-        match CpuStats::from_proc_stat() {
+        // Calculate container CPU usage using cgroups (same as docker stats)
+        match CgroupCpuStats::from_cgroup() {
             Ok(current_stats) => {
-                if let Some(ref last_stats) = self.last_cpu_stats {
-                    let total_diff = current_stats.total() - last_stats.total();
-                    let active_diff = current_stats.active_total() - last_stats.active_total();
+                if let Some(ref last_stats) = self.last_cgroup_stats {
+                    let container_usage_diff = current_stats.usage_total - last_stats.usage_total;
+                    let system_usage_diff = current_stats.system_usage - last_stats.system_usage;
                     
-                    if total_diff > 0 {
-                        self.container_cpu_usage = (active_diff as f64 / total_diff as f64) * 100.0;
+                    if system_usage_diff > 0 {
+                        // Calculate CPU usage percentage (same method as docker stats)
+                        let cpu_percent = (container_usage_diff as f64 / system_usage_diff as f64) 
+                            * current_stats.online_cpus as f64 * 100.0;
                         
-                        // Debug information for troubleshooting
-                        debug!("CPU calculation - Total diff: {}, Active diff: {}, Usage: {:.2}%", 
-                               total_diff, active_diff, self.container_cpu_usage);
+                        self.container_cpu_usage = cpu_percent.min(100.0).max(0.0);
+                        
+                        info!("Cgroup CPU calculation - Container: {} ns, System: {} ns, CPUs: {}, Usage: {:.2}%", 
+                               container_usage_diff, system_usage_diff, current_stats.online_cpus, self.container_cpu_usage);
                     }
                 } else {
-                    // First measurement, can't calculate diff yet
+                    // First measurement
                     self.container_cpu_usage = 0.0;
-                    info!("First CPU measurement taken, next measurement will show usage");
+                    info!("First cgroup CPU measurement taken");
                 }
-                self.last_cpu_stats = Some(current_stats);
+                self.last_cgroup_stats = Some(current_stats);
             }
             Err(e) => {
-                warn!("Failed to read /proc/stat for accurate CPU usage: {}", e);
-                // Fallback to sysinfo (less accurate in containers)
-                let fallback_usage = self.system.global_cpu_info().cpu_usage() as f64;
-                self.container_cpu_usage = fallback_usage;
-                debug!("Using fallback CPU calculation: {:.2}%", fallback_usage);
+                warn!("Failed to read cgroup CPU stats: {}", e);
+                // Fallback to /proc/stat method
+                self.container_cpu_usage = self.system.global_cpu_info().cpu_usage() as f64;
+                debug!("Using fallback CPU calculation: {:.2}%", self.container_cpu_usage);
             }
         }
         
@@ -146,7 +199,7 @@ pub async fn start_cpu_metrics_collection() {
     let state_clone1 = Arc::clone(&cpu_state);
     let _container_cpu_gauge = meter
         .f64_observable_gauge("container_cpu_usage")
-        .with_description("Accurate container CPU usage percentage calculated from /proc/stat")
+        .with_description("Container CPU usage percentage using cgroups (same as docker stats)")
         .with_callback(move |observer| {
             if let Ok(state) = state_clone1.lock() {
                 observer.observe(
@@ -155,7 +208,7 @@ pub async fn start_cpu_metrics_collection() {
                         KeyValue::new("service.name", "shippingservice"),
                         KeyValue::new("metric.type", "container_cpu"),
                         KeyValue::new("scope", "container"),
-                        KeyValue::new("calculation_method", "proc_stat"),
+                        KeyValue::new("calculation_method", "cgroups"),
                     ],
                 );
             }
@@ -201,7 +254,7 @@ pub async fn start_cpu_metrics_collection() {
         })
         .init();
 
-    info!("CPU metrics observable gauges registered successfully (using /proc/stat for accurate container CPU)");
+    info!("CPU metrics observable gauges registered successfully (using cgroups like docker stats)");
 
     // Background task to refresh the metrics data
     let mut interval = interval(Duration::from_secs(5));
@@ -217,7 +270,7 @@ pub async fn start_cpu_metrics_collection() {
         
         if let Ok(mut state) = cpu_state.lock() {
             state.refresh();
-            info!("Updated metrics - Container CPU: {:.2}% (accurate), Process CPU: {:.2}%, Memory: {} bytes", 
+            info!("Updated metrics - Container CPU: {:.2}% (cgroup-based, matches docker stats), Process CPU: {:.2}%, Memory: {} bytes", 
                    state.container_cpu_usage, state.process_cpu_usage, state.process_memory_usage);
         }
     }
