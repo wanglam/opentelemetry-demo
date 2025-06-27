@@ -12,7 +12,6 @@ use opentelemetry::{
             SdkProvidedResourceDetector,
         },
         trace as sdktrace,
-        metrics as sdkmetrics,
     },
 };
 use opentelemetry_otlp::{self, WithExportConfig};
@@ -41,29 +40,6 @@ fn init_logger() -> Result<(), log::SetLoggerError> {
         SimpleLogger::new(LevelFilter::Error, Config::default()),
     ])
     // debug is used on lower level apis and not used here.
-}
-
-fn init_meter_provider() -> Result<sdkmetrics::MeterProvider, opentelemetry::metrics::MetricsError> {
-    let os_resource = OsResourceDetector.detect(Duration::from_secs(0));
-    let process_resource = ProcessResourceDetector.detect(Duration::from_secs(0));
-    let sdk_resource = SdkProvidedResourceDetector.detect(Duration::from_secs(0));
-    let env_resource = EnvResourceDetector::new().detect(Duration::from_secs(0));
-    let telemetry_resource = TelemetryResourceDetector.detect(Duration::from_secs(0));
-    
-    opentelemetry_otlp::new_pipeline()
-        .metrics(opentelemetry::runtime::Tokio)
-        .with_exporter(
-            opentelemetry_otlp::new_exporter()
-                .tonic()
-                .with_endpoint(format!(
-                    "{}{}",
-                    env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
-                        .unwrap_or_else(|_| "http://otelcol:4317".to_string()),
-                    "/v1/metrics"
-                ))
-        )
-        .with_resource(os_resource.merge(&process_resource).merge(&sdk_resource).merge(&env_resource).merge(&telemetry_resource))
-        .build()
 }
 
 fn init_tracer() -> Result<sdktrace::Tracer, TraceError> {
@@ -107,11 +83,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
 
     init_logger()?;
-    
-    // Initialize meter provider for metrics
-    let _meter_provider = init_meter_provider()?;
-    global::set_meter_provider(_meter_provider);
-    
     init_reqwest_tracing(init_tracer()?)?;
     info!("OTel pipeline created");
     
