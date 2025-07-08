@@ -6,59 +6,68 @@ require "pony"
 require "sinatra"
 require 'json'
 require 'time'  # for ISO 8601 formatting
+require 'logger'
 
 require "opentelemetry/sdk"
 require "opentelemetry/exporter/otlp"
 require "opentelemetry/instrumentation/sinatra"
-require "opentelemetry/logs/sdk"
 
 set :port, ENV["EMAIL_PORT"]
-
-# Configure OpenTelemetry logging
-log_exporter = OpenTelemetry::Exporter::OTLP::LogsExporter.new
-log_processor = OpenTelemetry::Logs::SDK::Export::BatchLogRecordProcessor.new(log_exporter)
-logger_provider = OpenTelemetry::Logs::SDK::LoggerProvider.new
-logger_provider.add_log_record_processor(log_processor)
-OpenTelemetry::Logs.logger_provider = logger_provider
-
-# Get OpenTelemetry logger
-otel_logger = OpenTelemetry::Logs.logger_provider.logger("email-service")
 
 OpenTelemetry::SDK.configure do |c|
   c.use "OpenTelemetry::Instrumentation::Sinatra"
 end
 
-# Helper function for structured logging with OpenTelemetry
-def log_with_otel(message, attributes = {}, severity: :info)
-  # Convert severity to OpenTelemetry severity number
-  severity_map = {
-    debug: 5,
-    info: 9,
-    warn: 13,
-    error: 17,
-    fatal: 21
-  }
+# Try to set up ForwardingLogger for OpenTelemetry log integration
+begin
+  # Create a ForwardingLogger that sends logs to OpenTelemetry
+  otel_logger = OpenTelemetry::SDK::ForwardingLogger.new(Logger.new(STDOUT))
+  puts "ForwardingLogger initialized successfully"
+rescue => e
+  # Fallback to regular logger if ForwardingLogger is not available
+  otel_logger = Logger.new(STDOUT)
+  otel_logger.formatter = proc do |severity, datetime, progname, msg|
+    {
+      timestamp: datetime.utc.iso8601(3),
+      level: severity,
+      service: "email-service",
+      message: msg
+    }.to_json + "\n"
+  end
+  puts "Using fallback logger: #{e.message}"
+end
+
+# Enhanced logging using OpenTelemetry ForwardingLogger
+def log_with_otel_logger(message, attributes = {}, level: :info)
+  # Create structured log message
+  log_data = {
+    message: message,
+    service: "email-service"
+  }.merge(attributes)
   
-  severity_number = severity_map[severity] || 9
+  # Add trace correlation
+  current_span = OpenTelemetry::Trace.current_span
+  span_context = current_span.context
+  if span_context.valid?
+    log_data[:trace_id] = span_context.trace_id.unpack1('H*')
+    log_data[:span_id] = span_context.span_id.unpack1('H*')
+  end
   
-  # Create log record
-  log_record = OpenTelemetry::Logs::SDK::LogRecord.new(
-    timestamp: Time.now,
-    severity_number: severity_number,
-    severity_text: severity.to_s.upcase,
-    body: message,
-    attributes: attributes
-  )
-  
-  # Emit log record
-  otel_logger.emit(log_record)
-  
-  # Also print to console for local development
-  puts({
-    time: Time.now.utc.iso8601(3),
-    level: severity.to_s.upcase,
-    message: message
-  }.merge(attributes).to_json)
+  # Use the OpenTelemetry logger
+  case level
+  when :debug
+    otel_logger.debug(log_data.to_json)
+  when :info
+    otel_logger.info(log_data.to_json)
+  when :warn
+    otel_logger.warn(log_data.to_json)
+  when :error
+    otel_logger.error(log_data.to_json)
+  when :fatal
+    otel_logger.fatal(log_data.to_json)
+  else
+    otel_logger.info(log_data.to_json)
+  end
 end
 
 post "/send_order_confirmation" do
@@ -71,7 +80,7 @@ post "/send_order_confirmation" do
   })
 
   # Log request received
-  log_with_otel("Email request received", {
+  log_with_otel_logger("Email request received", {
     "app.order.id" => data.order.order_id,
     "app.email.recipient" => data.email
   })
@@ -84,11 +93,11 @@ post "/send_order_confirmation" do
     current_span.record_exception(e)
     current_span.set_status(OpenTelemetry::Trace::Status::ERROR, e.message)
     
-    log_with_otel("Email sending failed", {
+    log_with_otel_logger("Email sending failed", {
       "app.order.id" => data.order.order_id,
       "app.email.recipient" => data.email,
       "error" => e.message
-    }, severity: :error)
+    }, level: :error)
     
     status 500
     { error: "Failed to send email" }.to_json
@@ -99,10 +108,10 @@ error do
   OpenTelemetry::Trace.current_span.record_exception(env['sinatra.error'])
   
   # Log the error with trace correlation
-  log_with_trace("Unhandled error in email service", {
+  log_with_otel_logger("Unhandled error in email service", {
     "error" => env['sinatra.error'].message,
     "error_class" => env['sinatra.error'].class.name
-  }, level: "ERROR")
+  }, level: :error)
 end
 
 def send_email(data)
@@ -121,7 +130,7 @@ def send_email(data)
       span.set_attribute("app.email.recipient", data.email)
       
       # Log successful email sending
-      log_with_trace("Order confirmation email sent", {
+      log_with_otel_logger("Order confirmation email sent", {
         "app.email.recipient" => data.email,
         "app.order.id" => data.order.order_id
       })
@@ -131,11 +140,11 @@ def send_email(data)
       span.set_status(OpenTelemetry::Trace::Status::ERROR, e.message)
       
       # Log email sending failure
-      log_with_trace("Failed to send order confirmation email", {
+      log_with_otel_logger("Failed to send order confirmation email", {
         "app.email.recipient" => data.email,
         "app.order.id" => data.order.order_id,
         "error" => e.message
-      }, level: "ERROR")
+      }, level: :error)
       
       raise e  # Re-raise the exception to be handled by the caller
     end
